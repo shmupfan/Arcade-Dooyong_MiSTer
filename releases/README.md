@@ -11,7 +11,7 @@ Alternative versions live in `_alternatives/_<game>/` and are copied to
 
 | File | md5 | Notes |
 |------|-----|-------|
-| `Arcade-Dooyong_20261004.rbf` | `feafc9e4066f203c5d04789f7bcf3be2` | M6295 BUSY timed as the datasheet, phrase end and start handling as MAME, YM2151 writes timed to the chip clock (docs/m3_findings.md); video sync keeps running (black) during the ROM download instead of stopping; HDMI scale options (docs/m4_findings.md section 6). |
+| `Arcade-Dooyong_20261004.rbf` | `d1e427221be7c1f96ba48086fa8a5ded` | Updated the same day (first build `feafc9e4066f203c5d04789f7bcf3be2`): the YM2151 and YM2203s now reset properly (their clock enable runs during reset), so Sadari's tone and Pollux's noise in the first seconds after power-on are gone and R-Shark and Flying Tiger start at the right level; audio matches MAME from power-on. Also: M6295 BUSY timed as the datasheet, phrase end and start handling as MAME, YM2151 writes timed to the chip clock (docs/m3_findings.md); video sync keeps running (black) during the ROM download instead of stopping; HDMI scale options (docs/m4_findings.md section 6). |
 | `Arcade-Dooyong_20260930.rbf` | `29d749eb7c4166184e12fde7f8eeccdf` | First release: all ten games, 25 sets. Replaced by 20261004 (in git history). |
 
 Every released RBF passed, in order: frame replay against MAME for
