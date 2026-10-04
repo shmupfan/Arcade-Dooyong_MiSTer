@@ -116,6 +116,38 @@ module dy_snd #(
   end
   wire ym_cen_p1 = ym_cen && ym_ph;
 
+  // Reset-time enable for the FM chips. jt51 and jt03 load their reset values
+  // only by shifting with cen while rst is high (jt51_sh, jt12_sh: "rst should
+  // be at least 6 clk&cen cycles long", jt03.v; YM2151 and YM2203 data sheets:
+  // the IC pulse must cover many clock cycles). With the enables held at 0
+  // in reset, every operator kept zero attenuation (full volume) and the FM
+  // outputs sat at a large constant until the program's first writes, where
+  // MAME outputs 0 (m3_findings 7). This enable runs only while rst_n is low,
+  // one pulse every 8 clocks for RST_CEN pulses, so the chips reset fully;
+  // the normal enables above still restart from 0 at the release, so every
+  // enable after reset is unchanged.
+  localparam logic [12:0] RST_CEN = 13'd4608;   // 72 x 64: whole jt03 and jt51 slot cycles
+  logic [2:0]  rst_div;
+  logic [12:0] rst_cnt;
+  logic        rst_cen, rst_ph;
+  always_ff @(posedge clk) begin
+    rst_cen <= 1'b0;
+    if (rst_n) begin
+      rst_div <= '0;
+      rst_cnt <= '0;
+      rst_ph  <= 1'b0;
+    end else if (rst_cnt != RST_CEN) begin
+      rst_div <= rst_div + 3'd1;
+      if (rst_div == 3'd0) begin
+        rst_cen <= 1'b1;
+        rst_ph  <= !rst_ph;
+        rst_cnt <= rst_cnt + 13'd1;
+      end
+    end
+  end
+  wire fm_cen    = rst_n ? ym_cen    : rst_cen;
+  wire fm_cen_p1 = rst_n ? ym_cen_p1 : (rst_cen && rst_ph);
+
   // YM2203 clock enable (chip clock; jt03 divides internally)
   logic [27:0] opn_acc;
   logic        opn_cen;
@@ -132,6 +164,7 @@ module dy_snd #(
       opn_cen <= 1'b0;
     end
   end
+  wire opn_cen_c = rst_n ? opn_cen : rst_cen;   // reset-time enable (above)
 
   // ================================================================ CPU
   logic [15:0] A /* verilator public_flat_rd */;
@@ -216,7 +249,7 @@ module dy_snd #(
     end else if (ym_cen_p1) ym_wpend <= 1'b0;
   end
   jt51 u_ym (
-    .rst(!rst_n), .clk(clk), .cen(ym_cen), .cen_p1(ym_cen_p1),
+    .rst(!rst_n), .clk(clk), .cen(fm_cen), .cen_p1(fm_cen_p1),
     .cs_n(!(ym_wpend && ym_cen_p1)), .wr_n(1'b0), .a0(ym_wa0), .din(ym_wd),
     .dout(ym_dout),
     .ct1(), .ct2(), .irq_n(ym_irq_n),
@@ -227,34 +260,25 @@ module dy_snd #(
   logic signed [15:0] opn1_fm, opn2_fm;
   logic [9:0]  opn1_ssg, opn2_ssg;
   jt03 u_opn1 (
-    .rst(!rst_n || !i_opn), .clk(clk), .cen(opn_cen),
+    .rst(!rst_n || !i_opn), .clk(clk), .cen(opn_cen_c),
     .din(dout), .addr(A[0]), .cs_n(!(wr && s_opn1)), .wr_n(1'b0),
     .dout(opn1_dout), .irq_n(opn1_irq_n),
     .IOA_in(8'd0), .IOB_in(8'd0), .IOA_out(), .IOB_out(), .IOA_oe(), .IOB_oe(),
     .psg_A(), .psg_B(), .psg_C(), .fm_snd(opn1_fm), .psg_snd(opn1_ssg),
     .snd(), .snd_sample(), .debug_view());
   jt03 u_opn2 (
-    .rst(!rst_n || !i_opn), .clk(clk), .cen(opn_cen),
+    .rst(!rst_n || !i_opn), .clk(clk), .cen(opn_cen_c),
     .din(dout), .addr(A[0]), .cs_n(!(wr && s_opn2)), .wr_n(1'b0),
     .dout(opn2_dout), .irq_n(opn2_irq_n),
     .IOA_in(8'd0), .IOB_in(8'd0), .IOA_out(), .IOB_out(), .IOA_oe(), .IOB_oe(),
     .psg_A(), .psg_B(), .psg_C(), .fm_snd(opn2_fm), .psg_snd(opn2_ssg),
     .snd(), .snd_sample(), .debug_view());
 
-  // jt03's FM output sits at a large constant (about -49,000 for the pair)
-  // from reset until the program's first register writes (0.23 s after
-  // reset on lastday); MAME outputs 0. Each chip's FM output is held at 0
-  // until its first write, which avoids a thump at power-on.
-  logic opn1_on, opn2_on;
-  always_ff @(posedge clk) begin
-    if (!rst_n) {opn1_on, opn2_on} <= 2'b00;
-    else begin
-      if (wr && s_opn1) opn1_on <= 1'b1;
-      if (wr && s_opn2) opn2_on <= 1'b1;
-    end
-  end
-  wire signed [15:0] opn1_fm_g = opn1_on ? opn1_fm : 16'sd0;
-  wire signed [15:0] opn2_fm_g = opn2_on ? opn2_fm : 16'sd0;
+  // The FM outputs idle at 0 from reset now that the chips reset with an
+  // enable (reset-time enable above); the earlier first-write gate on each
+  // chip's FM output is no longer needed (m3_findings 7).
+  wire signed [15:0] opn1_fm_g = opn1_fm;
+  wire signed [15:0] opn2_fm_g = opn2_fm;
 
   // simulation taps for the YM2203 gain calibration (m3/fit_opn.py)
   logic signed [16:0] dbg_fm  /* verilator public_flat_rd */;

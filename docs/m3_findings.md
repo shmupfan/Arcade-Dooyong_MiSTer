@@ -238,3 +238,55 @@ board may take either path at that frame.
 | Hyper Duel, Magical Error | the games never read the status; MAME's OKI streams replayed through the chip: level within 0.004 dB | none |
 
 Not built: a video change is being added first, then one build.
+
+## 7. FM chips reset with a clock enable (2026-10-04)
+
+**Cause.** jt51 and jt03 load their reset values only by shifting with
+their clock enable while `rst` is high (`jt51_sh`, `jt12_sh`; jt03.v: "rst
+should be at least 6 clk&cen cycles long"; the YM2151 and YM2203 data sheets
+ask for an IC pulse covering many clock cycles). `dy_snd.sv` held both
+enables at 0 in reset, so the operator state (attenuation, envelope phase)
+was never initialised. The YM2203 FM outputs sat at a large constant until
+the first writes; the first-write gate from the YM2203 work (ym2203
+findings) hid that constant but not the uninitialised operators behind it.
+Found by the Side Arms variants core's M3 (sidearms-mister e3bc730) and the
+DEC8 core's M3 (dec8-mister fb9b52f).
+
+**Fix.** A reset-only enable drives jt51 and jt03 while `rst_n` is low: one
+pulse every 8 clocks, 4,608 pulses. 4,608 = 72 x 64 is a whole number of
+jt03 slot cycles (prescaler 6 x 12 slots) and jt51 slot cycles (64 enables),
+so the chips' free-running counters (`jt12_div` prescaler, `jt12_reg` slot
+counter, which `rst` does not clear) leave reset at the same phase as before
+and every timer and busy edge after the release is unchanged. A first build
+with 4,096 pulses left the YM2203 slot counter at a different phase; Pollux's
+timer-driven writes then landed 31 pixels earlier and its sound program left
+MAME's path at write 91,818, so the count matters. The normal enables still
+restart from 0 at the release. The first-write FM gate is removed: the raw
+FM tap is 0 before the first write without it (Pollux, frames 1-12).
+
+**Verification** (600 frames from power-on, old build vs fix, 48 MHz
+harness; MAME 0.288 WAVs from `make m3-wav`):
+
+| Game | Sound CPU write log | Window | RMS old | RMS fix | RMS MAME |
+|---|---|---|---|---|---|
+| Flying Tiger (Z80, YM2151) | identical (9,912 lines) | 1.0-1.5 s | 3,597 | 2,753 | 2,846 |
+| | | 2-6 s | 2,292 | 2,296 | 2,349 |
+| Sadari (Primella, YM2151) | identical (7,182 lines) | 1-4 s | 4,024 | 3,187 | 3,217 |
+| | | 5-9 s | 2,703 | 0 | 0 |
+| Pollux (YM2203 x2) | identical (134,066 lines) | 0.5-4 s | 15.7 | 0 | 0 |
+| | | 5-8 s | 9,197 | 9,151 | 9,220 |
+| R-Shark (68000, YM2151) | identical (58,467 lines) | 0.5-2 s | 10,392 | 3,960 | 3,988 |
+| | | 2.5-6 s | 6,354 | 6,356 | 6,463 |
+
+Every sound CPU write, status read and vblank marker is identical in all four
+runs, so program flow is unchanged. The audio now matches MAME in every
+window. The old build played sound MAME does not: Sadari a sustained tone
+from about 5 s where MAME is silent (and +2 dB from 1 to 4 s; over the whole
+run Sadari was 3.9 dB above MAME, now -0.13 dB), R-Shark about 8 dB of extra
+sound in its first two seconds, Flying Tiger 2 dB extra around 1 s, Pollux
+faint noise for its first four seconds. Accurate side: the fix; the real
+chips are reset by IC on the board, and MAME's reset matches.
+
+This explains the earlier "FM sits at a constant until the first write"
+note in the YM2203 work: it was this missing reset, not a property of the
+chip.
