@@ -46,6 +46,9 @@ module dy_sys #(
     input  logic        rst_n,          // core reset request (active low)
     input  logic        i_pwr_rst_n,    // FREE_TIMING: power-on reset of the video timing
     input  logic [3:0]  i_game,
+    input  logic [3:0]  i_crt_h,        // OSD CRT position and flip (dy_video)
+    input  logic [2:0]  i_crt_v,
+    input  logic        i_osd_flip,
 
     // program ROM download: 0x00000-0x3FFFF main CPU, 0x40000-0x4FFFF sound CPU
     input  logic        i_dl_we,
@@ -598,6 +601,7 @@ module dy_sys #(
   dy_video #(.V_TOTAL(V_TOTAL), .FREE_TIMING(FREE_TIMING)) u_video (
     .clk(clk), .rst_n(crst_n), .ce_pix(ce_pix), .i_game(i_game),
     .i_tim_rst(tim_rst), .o_tim_evt(tim_evt),
+    .i_crt_h(i_crt_h), .i_crt_v(i_crt_v), .i_osd_flip(i_osd_flip),
     .i_cpu_addr(v_addr), .i_cpu_din(m68k ? m_dout : {8'h00, cpu_dout}), .i_cpu_be({~m_udsn, ~m_ldsn}),
     .i_pal_we(v_pal_we), .i_txt_we(v_txt_we), .i_spr_we(v_spr_we),
     .o_pal_dout(pal_q), .o_txt_dout(txt_q), .o_spr_dout(spr_q), .o_spr_dout16(m_spr_q16),

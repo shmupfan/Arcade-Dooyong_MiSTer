@@ -11,6 +11,12 @@
 //  Clocks: 96 MHz system (8 MHz CPU / pixel enables = /12), a -90 degree
 //  copy for SDRAM_CLK, and 48 MHz for the video path (arcade_video's HQ2x
 //  does not close timing at 96 MHz), all from pll.v.
+//
+//  CRT options (m4_findings 7): CRT H/V Position move the sync pulses (the
+//  picture area and the game's timing are unchanged); Flip Screen flips the
+//  picture in the renderer (XOR with the game's flip register), so it works
+//  on a CRT. Flip is for the vertical games only: hidden and off for the
+//  horizontal sets (Sadari, Gun Dealer '94, Primella, Pop Bingo).
 //============================================================================
 
 module emu
@@ -36,6 +42,8 @@ assign AUDIO_MIX = 2'b00;
 // clocks
 // ---------------------------------------------------------------------------
 wire clk_sys, clk_sdram, clk_vid, pll_locked;
+wire [3:0] game;      // from the MRA (dy_board)
+wire       vertical = (game <= 4'd4) || game == 4'd7 || game == 4'd8;   // lastday..bluehawk, superx, rshark ROT270
 pll pll (
 	.refclk(CLK_50M),
 	.rst(1'b0),
@@ -56,6 +64,9 @@ localparam CONF_STR = {
 	"H0OMN,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"H0O2,Orientation,Vertical,Horizontal;",
 	"O35,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"H1O[31],Flip Screen,Off,On;",
+	"O[27:24],CRT H Position,0,+2,+4,+6,+8,+10,+12,+14,-16,-14,-12,-10,-8,-6,-4,-2;",
+	"O[30:28],CRT V Position,0,+1,+2,+3,-4,-3,-2,-1;",
 	"H0O[13:12],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"-;",
 	"DIP;",
@@ -90,7 +101,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io (
 	.gamma_bus(gamma_bus),
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({15'd0, direct_video}),
+	.status_menumask({14'd0, ~vertical, direct_video}),
 	.forced_scandoubler(forced_scandoubler),
 	.direct_video(direct_video),
 	.video_rotated(video_rotated),
@@ -163,7 +174,6 @@ wire [9:0] joy1 = joystick_1[9:0] | {k2_b3, 1'b0, k_co2, k_st2, k2_b2, k2_b1, k2
 // 2 Coin2, 3 Start2, 4 Service. (lastday/gulfstrm/pollux use other SYSTEM
 // orders; they are not in this build.)
 // ---------------------------------------------------------------------------
-wire [3:0] game;
 wire       b3_on = (game == 4'd5) || (game >= 4'd7 && game <= 4'd9);   // sadari; 68000 games (P1/P2 bit 6)
 wire [7:0] p1  = ~{1'b0, b3_on & joy0[9], joy0[5:4], joy0[3:0]};
 wire [7:0] p2  = ~{1'b0, b3_on & joy1[9], joy1[5:4], joy1[3:0]};
@@ -183,6 +193,7 @@ dy_board #(.CPU_DIV(12), .CLK_HZ(96000000), .V_TOTAL(260), .PIX_NUM(1), .PIX_DEN
 	.i_ioctl_download(ioctl_download), .i_ioctl_wr(ioctl_wr), .i_ioctl_addr(ioctl_addr),
 	.i_ioctl_dout(ioctl_dout), .i_ioctl_index(ioctl_index), .o_ioctl_wait(ioctl_wait),
 	.i_p1(p1), .i_p2(p2), .i_system(sys),
+	.i_crt_h(status[27:24]), .i_crt_v(status[30:28]), .i_osd_flip(status[31] & vertical),
 	.o_r(r), .o_g(g), .o_b(b), .o_hblank(hbl), .o_vblank(vbl), .o_hs(hs), .o_vs(vs),
 	.o_de(de), .o_ce_pix(ce_pix), .o_audio(audio), .o_game(game),
 	.o_pen(), .o_vbl_irq(),
@@ -199,9 +210,11 @@ dy_board #(.CPU_DIV(12), .CLK_HZ(96000000), .V_TOTAL(260), .PIX_NUM(1), .PIX_DEN
 // ---------------------------------------------------------------------------
 // flytiger and bluehawk are ROT270 in MAME: turn the picture 90 degrees
 // counter-clockwise to stand it upright
-wire vertical   = (game <= 4'd4) || game == 4'd7 || game == 4'd8;   // lastday..bluehawk, superx, rshark ROT270
 wire no_rotate  = status[2] | direct_video | ~vertical;
 wire rotate_ccw = 1'b1;
+// screen_rotate's flip stays 0: the OSD Flip Screen (status[31]) flips the
+// core's own output, so it applies on a CRT as well as over HDMI; rotation
+// only affects the HDMI frame buffer
 wire flip       = 1'b0;
 
 wire [1:0] ar = status[23:22];

@@ -155,3 +155,80 @@ feafc9e4066f203c5d04789f7bcf3be2: every clock non-negative (core 96 MHz
 setup +0.878 / hold +0.253 ns, HDMI setup +0.222 / hold +0.177 ns,
 recovery and removal positive), 55% ALMs, 90% RAM blocks. Not yet tested
 on hardware.
+
+## 7. CRT options: sync on the hsync edge, CRT position, OSD flip (2026-10-05)
+
+Lee's core minimum standard (2026-10-05, after CRT tester reports on a
+sibling core) adds three rules; the RTL follows the Tecmo 16 and 1945k
+III cores.
+
+**Vsync on the hsync leading edge.** MiSTer's composite sync is HS XOR
+VS, so a VS edge between hsyncs is an extra sync pulse, which bends or
+unsyncs the top of a CRT picture. dy_video changed o_vs with the line
+counter at pixel 0 (hsync is pixels 464-495). Vsync now starts at the
+hsync leading edge of its first line and ends at the hsync leading edge
+three lines later (vs_on, same pixel enable as the HS rise).
+
+**Default sync positions (R1 still open).** Hsync pixels 464-495, as
+before. Vsync: lines 251-254 at the hsync (was lines 250-252 from pixel
+0), so the whole -4..+3 range stays inside vblank (from line 250 the +3
+setting would start it on the last visible line, 247). At the 0 setting a
+CRT shows the picture about 2 lines higher than with the 20261004
+release; +2 is within 48 pixels of the old position. Primella family
+(sadari, gundl94, primella): only lines 256-259 are blank at V_TOTAL 260,
+and the 3-line vsync fills them (lines 256-259 at the hsync; was 257-258,
+two lines). The CRT V position therefore does not apply on these three
+sets (range reduced to 0); H position works as on the other games. In
+the 256-line parity frame (M1/M2 sims) the primella family has no vsync,
+as before.
+
+**OSD CRT H/V Position** (status[27:24], [30:28], two's complement, the
+sibling cores' encoding): hs_beg = 464 - 2h (h -8..+7, picture right for
+positive), vs_beg = 251 - v (v -4..+3, picture down for positive), both
+taken at the start of vblank (line 248; 256 on the primella family), so
+they change only on whole frames. Only the sync pulses move: active area,
+blanking, totals and game timing are unchanged. Margins: hsync starts at
+450-480 and ends by pixel 511 (hblank 448-511 and 0-63); vsync starts on
+lines 248-255 and ends by line 258 (vblank 248-259 and 0-7).
+
+**OSD Flip Screen** (status[31]): the board has its own flip register
+(per game control bit, spec 9.1), already applied by the renderer (tile
+passes, text y scroll, sprite engine) from the copy taken at the register
+latch (line 7). The OSD bit is XORed into it at that latch, so it takes
+effect on whole frames and the game's Flip Screen DIP stays in the MRAs.
+screen_rotate only turns the HDMI picture; its flip input stays 0.
+
+**Status bits.** 24-31 were free (used: 0, 2, 3-5, 12-13, 22-23).
+
+**Pixel enable.** dy_sys's enable is the PIX_NUM/PIX_DEN accumulator set
+to 1/12 by the shell, i.e. exactly every 12th clock of 96 MHz (8 MHz),
+and the shell hands the video to arcade_video with a fixed divide-by-6
+enable on CLK_VIDEO (48 MHz). No fractional enable on hardware.
+
+**Tests.**
+- sim/m4/sync/tb_sync.cpp (dy_video alone, V_TOTAL 260): flytiger,
+  rshark and sadari, all 16 x 8 offset pairs each. Checked: VS rises and
+  falls on an HS rising edge, HS 32 pixels with a 512-pixel period, VS
+  3 lines (1,536 pixels), HS only inside hblank and VS only inside
+  vblank, HS start 400 - 2h pixels after the line's first active pixel,
+  VS start the expected number of pixels before the first visible pixel
+  (line 8, or line 0 on sadari with vs_beg fixed at 256). 384 pairs, 0
+  fail. The same test on a copy with the vsync switched at the line start
+  fails all 384.
+- M2 canary, flytiger, 301 frames from power-on, against the MAME
+  attract capture: unmodified RTL (baseline) and the new RTL both give 27
+  images exact, 10 explained by live reads, 0 unexplained, 114 RAM dump
+  files match; all 450 capture files of the two runs are byte-identical.
+- Flip canary, same run with +osdflip=1: 64 of 75 images are the normal
+  run turned 180 degrees exactly. The other 11 differ in one static strip
+  (native x 9-23, the full height, pens 0x4xx; 1,048 to 1,115 pixels),
+  so the board's flip is not a pure rotation there. The same run against
+  MAME's Flip Screen DIP capture (flytiger_flip, frames to 300): 28
+  images exact, 2 explained by live reads, 0 unexplained, 93 RAM dump
+  files match, so the OSD flip gives exactly MAME's flipped picture,
+  including that strip.
+- The emu shell lints under Verilator with the framework stubs; the M4
+  board harness builds (tb_board ties the new inputs to 0). The M2
+  harness takes +osdflip=1, +crth=N, +crtv=N.
+
+Not yet compiled or tried on a CRT.

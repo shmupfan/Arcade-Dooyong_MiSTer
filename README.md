@@ -70,8 +70,25 @@ Left Ctrl, Left Alt or Space, Left Shift, 1/2 start, 5/6 coin, 9
 service; player 2 on R/F/D/G, A, S, Q).
 
 OSD: DIP switches per game (from the MAME driver), aspect ratio,
-orientation for the vertical games, the standard scandoubler options, and
-HDMI scale (Normal, V-Integer, Narrower or Wider HV-Integer).
+orientation for the vertical games, the standard scandoubler options,
+HDMI scale (Normal, V-Integer, Narrower or Wider HV-Integer), and the CRT
+options below.
+
+CRT options: Flip Screen (the vertical games only; not offered for
+Sadari, Gun Dealer '94, Primella and Pop Bingo) turns the picture 180
+degrees in the core (it inverts the game's own flip screen setting), so
+it works on a CRT. CRT H Position (2 pixels a step, -16 to +14) and CRT V
+Position (1 line a step, -4 to +3) move the picture on a CRT by moving
+the sync pulses; the picture area and the game's timing do not change.
+Vertical sync starts and ends on a horizontal sync pulse, so composite
+sync (SCART) has no stray pulse above the picture. On Sadari, Gun Dealer
+'94 and Primella the vertical position is fixed: these games show all 256
+lines, and the vertical sync fills the 4 blank lines of the frame. I have
+checked these options in simulation; I have not tried them on a CRT yet.
+
+The vertical games are rotated only over HDMI. On a CRT the picture is
+not rotated; all of them are ROT270 games, so on a monitor mounted for
+ROT90 games, set Flip Screen to On.
 
 ## Accuracy notes
 
@@ -94,8 +111,8 @@ findings documents.
   whole-frame draw. Whether the real boards latch is not known; on the
   68000 games an unlatched board would show a split near line 123.
 - **Sadari / Gun Dealer '94 / Primella** show all 256 lines, as MAME
-  does, which leaves only 4 blank lines per frame. That is fine over
-  HDMI; analog CRT output is untested.
+  does, which leaves only 4 blank lines per frame (the vertical sync
+  fills them). That is fine over HDMI; analog CRT output is untested.
 - **YM2203 levels** are fitted to MAME's audio (within 0.3 dB); the
   YM2203 core's output is held silent until its first register write,
   where it otherwise sits at a large DC level.

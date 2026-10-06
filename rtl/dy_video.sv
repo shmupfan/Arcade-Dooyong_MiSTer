@@ -65,6 +65,11 @@ module dy_video #(
     input  logic        i_tim_rst,     // FREE_TIMING: synchronous counter reload
     output logic        o_tim_evt,     // FREE_TIMING: the next pixel starts the power-on line
     input  logic [3:0]  i_game,
+    // OSD (m4_findings 7): CRT position, two's complement, taken at vblank
+    // start; flip XORed into the board's flip screen register
+    input  logic [3:0]  i_crt_h,        // picture right by 2 px a step (-16..+14)
+    input  logic [2:0]  i_crt_v,        // picture down by 1 line a step (-4..+3; none on primella)
+    input  logic        i_osd_flip,
 
     // CPU side, already decoded by the system (M2); byte wide
     input  logic [11:0] i_cpu_addr,
@@ -165,6 +170,46 @@ module dy_video #(
   assign o_vbl_irq = vbl_start;
   assign o_irq6    = line_start && m68k && !vextra && vcnt == 8'd120;
 
+  // ================================================================ sync
+  // Sync positions are not in the driver (R1): hsync pixels 464-495 (the
+  // visible pixels are 64-447), vsync three lines from line 251 at the
+  // hsync (lines 250-252 from the line start before m4_findings 7; from
+  // line 250 the +3 setting would start it on the last visible line). The
+  // primella family has only lines 256-259 blank (at V_TOTAL 260), which a
+  // 3-line vsync fills: its vsync is lines 256-259 and the CRT V position
+  // does not apply (there is no vblank to move it in).
+  // The OSD CRT position moves the sync pulses only (m4_findings 7): a later
+  // sync moves the picture left (up), so the sync moves against the offset.
+  // Taken at the start of vblank (whole frames only). Margins: hsync starts
+  // at 450-480 and ends by pixel 511, inside the blanking of 448-511 and
+  // 0-63; vsync starts on lines 248-255 and ends by line 258, inside the
+  // blank lines 248-259 and 0-7.
+  localparam int HS_START = 464, HS_LEN = 32, VS_START = 251;
+  wire [8:0] vs_prm   = 9'd256;
+  wire [8:0] vbl_line = prm ? ((V_TOTAL > 256) ? 9'd256 : 9'd0) : 9'd248;
+  logic [8:0] hs_beg, vs_beg;
+  always_ff @(posedge clk) begin
+    if (tim_rst) begin
+      hs_beg <= 9'(HS_START);
+      vs_beg <= prm ? vs_prm : 9'(VS_START);
+    end else if (line_start && vfull == vbl_line) begin
+      hs_beg <= 9'(HS_START) - {{4{i_crt_h[3]}}, i_crt_h, 1'b0};
+      vs_beg <= prm ? vs_prm : 9'(VS_START) - {{6{i_crt_v[2]}}, i_crt_v};
+    end
+  end
+  // vsync starts and ends on an hsync leading edge: MiSTer's composite sync
+  // is HS XOR VS, so a VS edge between hsyncs is a false sync pulse that
+  // pulls the CRT's line timing just above the picture (m4_findings 7).
+  // vs_d = lines since vs_beg, modulo the frame (in the 256-line parity
+  // frame the pulse runs past the last line). No vsync on the primella
+  // family in the parity frame (no blank lines).
+  wire [9:0] vs_dw = {1'b0, vfull} + 10'(V_TOTAL) - {1'b0, vs_beg};
+  wire [8:0] vs_d  = (vfull >= vs_beg) ? vfull - vs_beg : vs_dw[8:0];
+  wire       vs_on = !(prm && V_TOTAL <= 256) &&
+                     ((vs_d == 9'd0 && hcnt >= hs_beg) || vs_d == 9'd1 || vs_d == 9'd2 ||
+                      (vs_d == 9'd3 && hcnt < hs_beg));
+  wire       hs_on = hcnt >= hs_beg && {1'b0, hcnt} < {1'b0, hs_beg} + 10'(HS_LEN);
+
   // ================================================================ registers
   logic [7:0] tm_live [4][8];
   logic [7:0] tm_l    [4][8];
@@ -184,7 +229,7 @@ module dy_video #(
       if (i_tm_we) tm_live[i_tm_layer][i_tm_reg] <= i_tm_din;
       if (latch_now) begin
         tm_l   <= tm_live;
-        flip_l <= i_flip;
+        flip_l <= i_flip ^ i_osd_flip;   // OSD flip (m4_findings 7)
         bank_l <= i_pal_bank;
         pri_l  <= i_pri_swap;
         sdis_l <= i_spr_disable;
@@ -648,10 +693,6 @@ module dy_video #(
   wire  [11:0] s1_px = s1_de ? s1_raw : 12'd0;
   wire         h_act = (hcnt >= 9'd64) && (hcnt <= 9'd447);
   wire         v_act = prm ? !vextra : (!vextra && (vcnt >= 8'd8) && (vcnt <= 8'd247));
-  // vsync: lines 250-252; primella lines 257-258 (only 256 + 4 blank lines
-  // on hardware; none in the 256-line parity frame)
-  wire         v_sync = prm ? (vextra && (vfull[2:0] == 3'd1 || vfull[2:0] == 3'd2))
-                            : (!vextra && vcnt >= 8'd250 && vcnt < 8'd253);
   wire [8:0]   ox    = 9'(hcnt - 9'd64);
 
   function automatic logic [23:0] to_rgb(logic [15:0] w, logic is444);
@@ -664,8 +705,8 @@ module dy_video #(
       s1_de <= h_act && v_act;
       s1_hb <= !h_act;
       s1_vb <= !v_act;
-      s1_hs <= (hcnt >= 9'd464) && (hcnt < 9'd496);
-      s1_vs <= v_sync;
+      s1_hs <= hs_on;                  // sync: see the sync section above
+      s1_vs <= vs_on;
       s1_raw <= obuf[{vcnt[1:0], ox}]; // unconditional: lets the buffer be a RAM
       s2_de <= s1_de;
       s2_hb <= s1_hb;
@@ -686,6 +727,6 @@ module dy_video #(
     end
   end
 
-  wire unused = &{1'b0, sb_qa_unused, rs_x[8], cfg.tx_lane0};
+  wire unused = &{1'b0, sb_qa_unused, rs_x[8], cfg.tx_lane0, vs_dw[9]};
 
 endmodule

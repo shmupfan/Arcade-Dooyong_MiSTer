@@ -21,6 +21,8 @@
 // 0xF808-0xF80A and to its ROM range as "vblank line hpos addr data" (the
 // same beam position the MAME oracle logs). +wav=FILE writes the mono mix
 // as 16-bit 48 kHz samples (raw, little-endian).
+// OSD (m4_findings 7): +osdflip=1 (Flip Screen), +crth=N (-8..7) and
+// +crtv=N (-4..3) (CRT position; sync only, the captured pixels do not move).
 
 #include "Vdy_sys.h"
 #include "Vdy_sys___024root.h"
@@ -143,6 +145,9 @@ int main(int argc, char **argv) {
     top->i_p1 = top->i_p2 = top->i_system = 0xFF;
     top->i_dswa = strtol(plus("dswa", "FF").c_str(), nullptr, 16);
     top->i_dswb = strtol(plus("dswb", "FF").c_str(), nullptr, 16);
+    top->i_osd_flip = atoi(plus("osdflip", "0").c_str()) & 1;
+    top->i_crt_h = atoi(plus("crth", "0").c_str()) & 15;
+    top->i_crt_v = atoi(plus("crtv", "0").c_str()) & 7;
     top->rst_n = 0;
     top->i_dl_we = 0;
     for (int i = 0; i < 8; i++) tick();

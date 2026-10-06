@@ -34,6 +34,9 @@ module dy_board #(
     input  logic [7:0]  i_p1,
     input  logic [7:0]  i_p2,
     input  logic [7:0]  i_system,
+    input  logic [3:0]  i_crt_h,        // OSD CRT position (2 px steps) and flip
+    input  logic [2:0]  i_crt_v,
+    input  logic        i_osd_flip,
 
     output logic [7:0]  o_r,
     output logic [7:0]  o_g,
@@ -125,6 +128,7 @@ module dy_board #(
   dy_sys #(.CPU_DIV(CPU_DIV), .CLK_HZ(CLK_HZ), .V_TOTAL(V_TOTAL),
            .PIX_NUM(PIX_NUM), .PIX_DEN(PIX_DEN), .FREE_TIMING(1'b1)) u_sys (
     .clk(clk), .rst_n(core_rst_n), .i_pwr_rst_n(i_sdram_rst_n), .i_game(game),
+    .i_crt_h(i_crt_h), .i_crt_v(i_crt_v), .i_osd_flip(i_osd_flip),
     .i_dl_we(dl_main || dl_snd), .i_dl_addr(dl_baddr), .i_dl_data(i_ioctl_dout),
     .o_oki_addr(oki_addr), .i_oki_data(oki_data), .i_oki_ok(oki_ok),
     .o_audio(o_audio),
